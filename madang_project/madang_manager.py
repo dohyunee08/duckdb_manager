@@ -1,49 +1,64 @@
 
-import streamlit as st 
+import streamlit as st
 import duckdb
 import pandas as pd
 import time
-dbConn = pymysql.connect(user='root', passwd='1234', host='localhost', db='madang', charset='utf8')
-cursor = dbConn.cursor(pymysql.cursors.DictCursor)
 
-def query(sql):
-       cursor.execute(sql)
-       return cursor.fetchall()
+# DuckDB 연결
+con = duckdb.connect(database="data/madang.duckdb", read_only=False)
 
-books = [None]
-result = query("select concat(bookid, ',', bookname) from Book")
-for res in result:
-       books.append(list(res.values())[0])
+def query(sql, params=None):
+    if params:
+        return con.execute(sql, params).fetchdf()
+    return con.execute(sql).fetchdf()
+
+# 책 목록
+books_df = query("SELECT bookid, bookname FROM Book")
+books = ["선택하세요"] + [f"{row.bookid}, {row.bookname}" for _, row in books_df.iterrows()]
 
 tab1, tab2 = st.tabs(["고객조회", "거래 입력"])
-name = ""
-custid = 999
-result =pd.DataFrame()
+
+# 고객 조회
 name = tab1.text_input("고객명")
-select_book = ""
+if name:
+    sql = """
+        SELECT c.custid, c.name, b.bookname, o.orderdate, o.saleprice
+        FROM Customer c
+        JOIN Orders o ON c.custid = o.custid
+        JOIN Book b ON b.bookid = o.bookid
+        WHERE c.name = ?
+    """
+    result = query(sql, [name])
 
-if len(name) > 0:
-       sql = "select c.custid, c.name, b.bookname, o.orderdate, o.saleprice from Customer c, Book b, Orders o \
-              where c.custid = o.custid and o.bookid = b.bookid and name = '" + name + "';"
-       cursor.execute(sql)
-       result = cursor.fetchall()
-       result = pd.DataFrame(result)
-       tab1.write(result)
-       custid = result['custid'][0]
-       tab2.write("고객번호: " + str(custid))
-       tab2.write("고객명: " + name)
-       select_book = tab2.selectbox("구매 서적:",books)
+    if len(result) == 0:
+        tab1.warning("해당 고객이 없습니다.")
+    else:
+        tab1.write(result)
+        custid = result.iloc[0]["custid"]
 
-       if select_book is not None:
-              bookid = select_book.split(",")[0]
-              dt = time.localtime()
-              dt = time.strftime('%Y-%m-%d', dt)
-              orderid = query("select max(orderid) from orders;")[0]['max(orderid)'] + 1
-              price = tab2.text_input("금액")
-              sql = "insert into orders (orderid, custid, bookid, saleprice, orderdate) values (" + str(orderid) + "," + str(custid) + "," + str(bookid) + "," + str(price) + ",'" + dt + "');"
-              if tab2.button('거래 입력'):
-                     dbConn.commit()
-                     tab2.write('거래가 입력되었습니다.')
+        tab2.write(f"고객번호: {custid}")
+        tab2.write(f"고객명: {name}")
+
+        select_book = tab2.selectbox("구매 서적:", books)
+
+        if select_book != "선택하세요":
+            bookid = int(select_book.split(",")[0])
+            dt = time.strftime('%Y-%m-%d')
+            price = tab2.text_input("금액", key="price")
+
+            if tab2.button("거래 입력"):
+                new_id = query("SELECT COALESCE(MAX(orderid), 0) + 1 AS id FROM Orders")["id"][0]
+
+                con.execute(
+                    """
+                    INSERT INTO Orders (orderid, custid, bookid, saleprice, orderdate)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    [new_id, custid, bookid, int(price), dt]
+                )
+                con.commit()
+                tab2.success("거래가 입력되었습니다.")
+
 
 
 
