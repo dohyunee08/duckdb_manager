@@ -5,7 +5,7 @@ import pandas as pd
 import time
 
 # DuckDB 연결
-con = duckdb.connect(database="data/madang.duckdb", read_only=False)
+con = duckdb.connect(database="madang_project/data/madang.duckdb", read_only=False)
 
 def query(sql, params=None):
     if params:
@@ -58,6 +58,7 @@ if name:
                 )
                 con.commit()
                 tab2.success("거래가 입력되었습니다.")
+
 
 
 
